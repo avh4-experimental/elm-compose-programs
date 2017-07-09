@@ -7,13 +7,40 @@ module ProgramRecord
         , getLocationChange
         , htmlProgram
         , navigationProgram
+        , navigationProgramWithFlags
         , toProgram
         , withFlags
         )
 
 {-|
 
-@docs ProgramRecord, ProgramType, applyInit, completableProgram , getLocationChange , htmlProgram , navigationProgram , toProgram , withFlags
+
+## Basics
+
+@docs ProgramRecord, toProgram
+
+
+## Typical programs
+
+
+### elm-lang/html
+
+@docs htmlProgram
+
+
+### elm-lang/navigation
+
+@docs navigationProgram, navigationProgramWithFlags
+
+
+## Special programs
+
+@docs completableProgram
+
+
+## TODO
+
+@docs ProgramType, applyInit, getLocationChange , withFlags
 
 -}
 
@@ -165,7 +192,8 @@ toProgram record =
     f (y a b)
 
 
-{-| -}
+{-| Creates a `ProgramRecord` with the configuration you would normally use with `elm-lang/html: Html.program`
+-}
 htmlProgram :
     { init : ( model, Cmd msg )
     , update : msg -> model -> ( model, Cmd msg )
@@ -181,7 +209,8 @@ htmlProgram config =
     }
 
 
-{-| -}
+{-| Creates a `ProgramRecord` with the configuration you would normally use with `elm-lang/navigation: Navigation.program`
+-}
 navigationProgram :
     (Location -> msg)
     ->
@@ -199,6 +228,8 @@ navigationProgram onLocationChange config =
     }
 
 
+{-| Creates a `ProgramRecord` with the configuration you would normally use with `elm-lang/navigation: Navigation.programWithFlags`
+-}
 navigationProgramWithFlags :
     (Location -> msg)
     ->
