@@ -6,9 +6,11 @@ module ProgramRecord
         , completableProgram
         , getLocationChange
         , htmlProgram
+        , htmlProgramWithFlags
         , navigationProgram
         , navigationProgramWithFlags
         , toProgram
+        , toProgramWithFlags
         , withFlags
         )
 
@@ -17,7 +19,7 @@ module ProgramRecord
 
 ## Basics
 
-@docs ProgramRecord, toProgram
+@docs ProgramRecord, toProgram, toProgramWithFlags
 
 
 ## Typical programs
@@ -25,7 +27,7 @@ module ProgramRecord
 
 ### elm-lang/html
 
-@docs htmlProgram
+@docs htmlProgram, htmlProgramWithFlags
 
 
 ### elm-lang/navigation
@@ -148,7 +150,11 @@ getLocationChange init =
             Just f
 
 
-{-| -}
+{-| Turns a `ProgramRecord` into a real `elm-lang/core: Platform.Program`.
+
+If your program has flags, you will need to use [`toProgramWithFlags`](#toProgramWithFlags) instead.
+
+-}
 toProgram : ProgramRecord Never Never model msg -> Platform.Program Never model msg
 toProgram record =
     case record.init of
@@ -161,6 +167,7 @@ toProgram record =
                 }
 
         WithFlags init ->
+            -- TODO: should be safe to crash here
             Html.programWithFlags
                 { init = init >> handleNever
                 , update = record.update >>> handleNever
@@ -176,6 +183,41 @@ toProgram record =
                 , subscriptions = record.subscriptions
                 , view = record.view
                 }
+
+        WithBoth init onLocationChange ->
+            -- TODO: should be safe to crash here
+            Navigation.programWithFlags
+                onLocationChange
+                { init = init >>> handleNever
+                , update = record.update >>> handleNever
+                , subscriptions = record.subscriptions
+                , view = record.view
+                }
+
+
+{-| Turns a `ProgramRecord` into a real `elm-lang/core: Platform.Program`.
+
+If your `flags` type is `Never`, you must use [`toProgram`](#toProgram) instead (if you don't you will get a runtime exception).
+
+-}
+toProgramWithFlags : ProgramRecord flags Never model msg -> Platform.Program flags model msg
+toProgramWithFlags record =
+    case record.init of
+        NoArgs value ->
+            -- NOTE: this is actually safe, since the ProgramRecord is NoArgs, then the `flags` type parameter is unbound, meaning it could safely be `Never`.  However, there is no `Platform.Program.map`, so we can't actually create a `Platform.Program` that won't crash at runtime, so instead we just crash now.
+            Debug.crash "You are using ProgramRecord.toProgramWithFlags with a ProgramRecord that doesn't have flags!  Use ProgramRecord.toProgram instead."
+
+        WithFlags init ->
+            Html.programWithFlags
+                { init = init >> handleNever
+                , update = record.update >>> handleNever
+                , subscriptions = record.subscriptions
+                , view = record.view
+                }
+
+        WithLocation init onLocationChange ->
+            -- NOTE: same note as for NoArgs above
+            Debug.crash "You are using ProgramRecord.toProgramWithFlags with a ProgramRecord that doesn't have flags!  Use ProgramRecord.toProgram instead."
 
         WithBoth init onLocationChange ->
             Navigation.programWithFlags
@@ -203,6 +245,23 @@ htmlProgram :
     -> ProgramRecord Never Never model msg
 htmlProgram config =
     { init = NoArgs (Err config.init)
+    , update = config.update >>> Err
+    , subscriptions = config.subscriptions
+    , view = config.view
+    }
+
+
+{-| Creates a `ProgramRecord` with the configuration you would normally use with `elm-lang/html: Html.programWithFlags`
+-}
+htmlProgramWithFlags :
+    { init : flags -> ( model, Cmd msg )
+    , update : msg -> model -> ( model, Cmd msg )
+    , subscriptions : model -> Sub msg
+    , view : model -> Html msg
+    }
+    -> ProgramRecord flags Never model msg
+htmlProgramWithFlags config =
+    { init = WithFlags (config.init >> Err)
     , update = config.update >>> Err
     , subscriptions = config.subscriptions
     , view = config.view
