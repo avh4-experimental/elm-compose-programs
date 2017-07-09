@@ -6,6 +6,15 @@ import ProgramRecord
 import Task
 
 
+type alias Model =
+    Maybe String
+
+
+type alias Msg =
+    Maybe String
+
+
+main : Program Never Model Msg
 main =
     ProgramRecord.htmlProgram
         { init =
