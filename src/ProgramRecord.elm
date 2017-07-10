@@ -1,17 +1,14 @@
 module ProgramRecord
     exposing
         ( ProgramRecord
-        , ProgramType(..)
-        , applyInit
+        , andThen
         , completableProgram
-        , getLocationChange
         , htmlProgram
         , htmlProgramWithFlags
         , navigationProgram
         , navigationProgramWithFlags
         , toProgram
         , toProgramWithFlags
-        , withFlags
         )
 
 {-|
@@ -40,14 +37,15 @@ module ProgramRecord
 @docs completableProgram
 
 
-## TODO
+## Combining programs
 
-@docs ProgramType, applyInit, getLocationChange , withFlags
+@docs andThen
 
 -}
 
 import Html exposing (Html)
 import Navigation exposing (Location)
+import Task exposing (Task)
 
 
 {-| `update` and `init` return a `Result` where:
@@ -320,6 +318,152 @@ completableProgram config =
     , subscriptions = config.subscriptions
     , view = config.view
     }
+
+
+
+--
+-- AndThen
+--
+
+
+type AndThenModel flags model1 model2 msg2 a
+    = First (Maybe flags) Location model1
+    | Second (ProgramRecord a Never model2 msg2) model2 -- TODO: shouldn't need first arg?
+
+
+type AndThenMsg a msg1 msg2
+    = LocationChange Location
+    | FirstMsg msg1
+    | SecondMsg msg2
+    | IgnoreMsg
+
+
+{-|
+
+  - TODO: allow `second` to have `done /= Never`
+  - TODO: allow `first` to have `flags /= Never`
+
+-}
+andThen : ProgramRecord a Never model2 msg2 -> ProgramRecord Never a model1 msg1 -> ProgramRecord Never Never (AndThenModel Never model1 model2 msg2 a) (AndThenMsg a msg1 msg2)
+andThen second first =
+    let
+        init :
+            ProgramRecord flags a model1 msg1
+            -> ProgramRecord a Never model2 msg2
+            -> Maybe flags
+            -> Location
+            -> ( AndThenModel flags model1 model2 msg2 a, Cmd (AndThenMsg a msg1 msg2) )
+        init first second flags location =
+            applyInit first.init flags location
+                |> handleFirstResult second flags location
+
+        handleFirstResult :
+            ProgramRecord a Never model2 msg2
+            -> Maybe flags
+            -> Location
+            -> Result ( model1, Cmd msg1 ) a
+            -> ( AndThenModel flags model1 model2 msg2 a, Cmd (AndThenMsg a msg1 msg2) )
+        handleFirstResult second flags location result =
+            case result of
+                Err ( authModel, authCmd ) ->
+                    ( First flags location authModel
+                    , authCmd
+                        |> Cmd.map FirstMsg
+                    )
+
+                Ok firstDone ->
+                    let
+                        ( mainModel, cmd ) =
+                            applyInit second.init (Just firstDone) location
+                                |> handleNever
+                    in
+                    ( Second second mainModel
+                    , Cmd.map SecondMsg cmd
+                    )
+
+        update :
+            ProgramRecord flags a model1 msg1
+            -> ProgramRecord a Never model2 msg2
+            -> AndThenMsg a msg1 msg2
+            -> AndThenModel flags model1 model2 msg2 a
+            -> ( AndThenModel flags model1 model2 msg2 a, Cmd (AndThenMsg a msg1 msg2) )
+        update first second msg model =
+            case model of
+                First flags location authModel ->
+                    case msg of
+                        LocationChange newLocation ->
+                            case getLocationChange first.init of
+                                Nothing ->
+                                    ( model, Cmd.none )
+
+                                Just onLocationChange ->
+                                    first.update (onLocationChange newLocation) authModel
+                                        |> handleFirstResult second flags newLocation
+
+                        FirstMsg authMsg ->
+                            first.update authMsg authModel
+                                |> handleFirstResult second flags location
+
+                        SecondMsg mainMsg ->
+                            Debug.crash "ProgramWithAuth.update: got a MainMsg before auth finished. (This should not be possible.)" ( msg, model )
+
+                        IgnoreMsg ->
+                            ( model, Cmd.none )
+
+                Second config mainModel ->
+                    case msg of
+                        LocationChange location ->
+                            getLocationChange config.init
+                                |> Maybe.map (\f -> f location)
+                                |> Maybe.map (\m -> update first second (SecondMsg m) model)
+                                |> Maybe.withDefault ( model, Cmd.none )
+
+                        FirstMsg authMsg ->
+                            Debug.log "ProgramWithAuth.update: got an AuthMsg after auth finished (this could happen if the auth program started a Task or Cmd that did not complete until after the auth finished in some other way)" ( msg, model )
+                                |> always ( model, Cmd.none )
+
+                        SecondMsg mainMsg ->
+                            config.update mainMsg mainModel
+                                |> handleNever
+                                |> Tuple.mapFirst (Second config)
+                                |> Tuple.mapSecond (Cmd.map SecondMsg)
+
+                        IgnoreMsg ->
+                            ( model, Cmd.none )
+
+        subscriptions :
+            AndThenModel flags model1 model2 msg2 a
+            -> Sub (AndThenMsg a msg1 msg2)
+        subscriptions model =
+            case model of
+                First _ _ authModel ->
+                    first.subscriptions authModel
+                        |> Sub.map FirstMsg
+
+                Second _ mainModel ->
+                    second.subscriptions mainModel
+                        |> Sub.map SecondMsg
+
+        view :
+            AndThenModel flags model1 model2 msg2 a
+            -> Html (AndThenMsg a msg1 msg2)
+        view model =
+            case model of
+                First _ _ authModel ->
+                    first.view authModel
+                        |> Html.map FirstMsg
+
+                Second _ mainModel ->
+                    second.view mainModel
+                        |> Html.map SecondMsg
+    in
+    navigationProgram
+        LocationChange
+        { init = init first second Nothing
+        , update = update first second
+        , subscriptions = subscriptions
+        , view = view
+        }
 
 
 handleNever : Result a Never -> a
