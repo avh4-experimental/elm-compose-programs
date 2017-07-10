@@ -2,9 +2,12 @@ module ProgramRecord
     exposing
         ( AndThenModel
         , AndThenMsg
+        , CacheModel
+        , CacheMsg
         , ProgramRecord
         , andThen
         , applyFlags
+        , cache
         , completableProgram
         , htmlProgram
         , htmlProgramWithFlags
@@ -42,7 +45,7 @@ module ProgramRecord
 
 ## Transforming programs
 
-@docs applyFlags
+@docs applyFlags, cache, CacheModel, CacheMsg
 
 
 ## Combining programs
@@ -53,6 +56,7 @@ module ProgramRecord
 
 import Html exposing (Html)
 import Navigation exposing (Location)
+import Process
 import Task exposing (Task)
 
 
@@ -76,6 +80,22 @@ type ProgramType flags init msg
     | WithFlags (flags -> init)
     | WithLocation (Location -> init) (Location -> msg)
     | WithBoth (flags -> Location -> init) (Location -> msg)
+
+
+mapProgramType : (a -> b) -> ProgramType flags a msg -> ProgramType flags b msg
+mapProgramType f t =
+    case t of
+        NoArgs init ->
+            NoArgs (f init)
+
+        WithFlags init ->
+            WithFlags (f << init)
+
+        WithLocation init onLocation ->
+            WithLocation (f << init) onLocation
+
+        WithBoth init onLocation ->
+            WithBoth (init >>> f) onLocation
 
 
 {-| -}
@@ -332,7 +352,7 @@ type AndThenModel model1 model2
 
 {-| -}
 type AndThenMsg msg1 msg2
-    = LocationChange Location
+    = AndThenLocationChange Location
     | FirstMsg msg1
     | SecondMsg msg2
     | IgnoreMsg
@@ -387,7 +407,7 @@ andThen second first =
             case model of
                 First location authModel ->
                     case msg of
-                        LocationChange newLocation ->
+                        AndThenLocationChange newLocation ->
                             case getLocationChange first.init of
                                 Nothing ->
                                     ( model, Cmd.none )
@@ -408,7 +428,7 @@ andThen second first =
 
                 Second mainModel ->
                     case msg of
-                        LocationChange location ->
+                        AndThenLocationChange location ->
                             getLocationChange second.init
                                 |> Maybe.map (\f -> f location)
                                 |> Maybe.map (\m -> update (SecondMsg m) model)
@@ -454,12 +474,153 @@ andThen second first =
                         |> Html.map SecondMsg
     in
     navigationProgram
-        LocationChange
+        AndThenLocationChange
         { init = init first second Nothing
         , update = update
         , subscriptions = subscriptions
         , view = view
         }
+
+
+
+--
+-- Cache
+--
+
+
+{-| -}
+type CacheModel model
+    = Loading Location
+    | Loaded model
+    | Writing
+
+
+{-| -}
+type CacheMsg done msg
+    = ReadResult (Result () done)
+    | LoadedMsg msg
+    | CacheLocationChange Location
+    | WriteSpawned done
+
+
+{-| Caches the completion value of the given `ProgramRecord` using the `read` and `write` Tasks that you provide.
+
+When the resulting program record starts, it will use the `read` task.
+If the read succeeds, the program will immediately complete with the read value.
+If the read fails, the provided program will run to completion, after which the result will be saved with the provided `write` task.
+
+If your `read` tasks takes a long time, you should provide a `loadingView` to be displayed while waiting for the task to finish.
+
+-}
+cache :
+    { read : Task () done
+    , write : done -> Task Never ()
+    , loadingView : Maybe (Html Never)
+    }
+    -> ProgramRecord flags done model msg
+    -> ProgramRecord flags done (CacheModel model) (CacheMsg done msg)
+cache config program =
+    let
+        update msg model =
+            case model of
+                Loading location ->
+                    case msg of
+                        LoadedMsg _ ->
+                            Debug.crash "Internal error: ProgramRecord.cache got a LoadedMsg while model == Loading"
+
+                        WriteSpawned done ->
+                            Debug.crash "Internal error: ProgramRecord.cache got a WriteSpawned while model == Loading"
+
+                        CacheLocationChange location ->
+                            Err ( Loading location, Cmd.none )
+
+                        ReadResult (Err ()) ->
+                            applyInit program.init Nothing location
+                                |> Result.mapError (Tuple.mapFirst Loaded >> Tuple.mapSecond (Cmd.map LoadedMsg))
+
+                        ReadResult (Ok done) ->
+                            Ok done
+
+                Loaded model ->
+                    case msg of
+                        ReadResult _ ->
+                            Debug.crash "Internal error: ProgramRecord.cache: read task resolved more than once!"
+
+                        WriteSpawned _ ->
+                            Debug.crash "Internal error: ProgramRecord.cache: got a WriteSpawned while model == Loaded"
+
+                        CacheLocationChange location ->
+                            getLocationChange program.init
+                                |> Maybe.map (\f -> f location)
+                                |> Maybe.map (\m -> update (LoadedMsg m) (Loaded model))
+                                |> Maybe.withDefault (Err ( Loaded model, Cmd.none ))
+
+                        LoadedMsg msg ->
+                            case program.update msg model of
+                                Err next ->
+                                    next
+                                        |> Tuple.mapFirst Loaded
+                                        |> Tuple.mapSecond (Cmd.map LoadedMsg)
+                                        |> Err
+
+                                Ok done ->
+                                    Err
+                                        ( Writing
+                                        , config.write done
+                                            |> Process.spawn
+                                            |> Task.perform (\_ -> WriteSpawned done)
+                                        )
+
+                Writing ->
+                    case msg of
+                        ReadResult _ ->
+                            Debug.crash "Internal error: ProgramRecord.cache: read task resolved more than once!"
+
+                        CacheLocationChange location ->
+                            -- We don't need location after writing, so we can safely ignore
+                            Err ( Writing, Cmd.none )
+
+                        LoadedMsg _ ->
+                            Debug.crash "Internal error: ProgramRecord.cache got a LoadedMsg while model == Loading"
+
+                        WriteSpawned done ->
+                            Ok done
+    in
+    { init =
+        flip WithLocation CacheLocationChange <|
+            \location ->
+                Err
+                    ( Loading location
+                    , config.read |> Task.attempt ReadResult
+                    )
+    , update = update
+    , subscriptions =
+        \model ->
+            case model of
+                Loading _ ->
+                    Sub.none
+
+                Writing ->
+                    Sub.none
+
+                Loaded model ->
+                    program.subscriptions model
+                        |> Sub.map LoadedMsg
+    , view =
+        \model ->
+            case model of
+                Loading _ ->
+                    config.loadingView
+                        |> Maybe.withDefault (Html.text "")
+                        |> Html.map never
+
+                Writing ->
+                    Html.text ""
+
+                Loaded model ->
+                    program.view model
+                        |> Html.map LoadedMsg
+    }
 
 
 handleNever : Result a Never -> a
