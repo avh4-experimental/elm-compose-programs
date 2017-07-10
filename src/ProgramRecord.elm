@@ -4,6 +4,7 @@ module ProgramRecord
         , AndThenMsg
         , ProgramRecord
         , andThen
+        , applyFlags
         , completableProgram
         , htmlProgram
         , htmlProgramWithFlags
@@ -39,6 +40,11 @@ module ProgramRecord
 @docs completableProgram
 
 
+## Transforming programs
+
+@docs applyFlags
+
+
 ## Combining programs
 
 @docs andThen, AndThenModel, AndThenMsg
@@ -60,10 +66,6 @@ type alias ProgramRecord flags done model msg =
     ProgramRecord_ flags (Result ( model, Cmd msg ) done) done model msg
 
 
-type alias ProgramWithFlags flags done model msg =
-    ProgramRecord_ flags (flags -> Result ( model, Cmd msg ) done) done model msg
-
-
 type alias ProgramRecord_ flags init done model msg =
     { init : ProgramType flags init msg
     , update : msg -> model -> Result ( model, Cmd msg ) done
@@ -78,36 +80,6 @@ type ProgramType flags init msg
     | WithFlags (flags -> init)
     | WithLocation (Location -> init) (Location -> msg)
     | WithBoth (flags -> Location -> init) (Location -> msg)
-
-
-{-| -}
-withFlags :
-    ProgramWithFlags flags done model msg
-    -> ProgramRecord flags done model msg
-withFlags r =
-    let
-        fixInit :
-            ProgramType flags (flags -> Result ( model, Cmd msg ) done) msg
-            -> ProgramType flags (Result ( model, Cmd msg ) done) msg
-        fixInit i =
-            case i of
-                NoArgs f ->
-                    WithFlags f
-
-                WithFlags f ->
-                    WithFlags <| \flags -> f flags flags
-
-                WithLocation f onLoc ->
-                    WithBoth (flip f) onLoc
-
-                WithBoth f onLoc ->
-                    WithBoth (\flags loc -> f flags loc flags) onLoc
-    in
-    { init = fixInit r.init
-    , update = r.update
-    , subscriptions = r.subscriptions
-    , view = r.view
-    }
 
 
 {-| -}
@@ -227,6 +199,34 @@ toProgramWithFlags record =
                 , subscriptions = record.subscriptions
                 , view = record.view
                 }
+
+
+{-| Provide flags to a ProgramRecord, producing a ProgramRecord that doesn't need flags
+-}
+applyFlags : flags -> ProgramRecord flags done model msg -> ProgramRecord Never done model msg
+applyFlags flags record =
+    let
+        newInit =
+            case record.init of
+                NoArgs _ ->
+                    -- We could only get here if the caller provided a value of type `Never`!
+                    Debug.crash "applyFlags: You tried to give flags to a ProgramRecord that doesn't accept flags!"
+
+                WithLocation _ _ ->
+                    -- We could only get here if the caller provided a value of type `Never`!
+                    Debug.crash "applyFlags: You tried to give flags to a ProgramRecord that doesn't accept flags!"
+
+                WithFlags init ->
+                    NoArgs (init flags)
+
+                WithBoth init onLocation ->
+                    WithLocation (init flags) onLocation
+    in
+    { init = newInit
+    , update = record.update
+    , subscriptions = record.subscriptions
+    , view = record.view
+    }
 
 
 (>>>) : (a -> b -> y) -> (y -> z) -> (a -> b -> z)
