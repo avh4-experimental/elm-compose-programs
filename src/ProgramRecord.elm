@@ -331,7 +331,7 @@ type AndThenModel flags model1 model2
     | Second model2
 
 
-type AndThenMsg a msg1 msg2
+type AndThenMsg msg1 msg2
     = LocationChange Location
     | FirstMsg msg1
     | SecondMsg msg2
@@ -344,7 +344,7 @@ type AndThenMsg a msg1 msg2
   - TODO: allow `first` to have `flags /= Never`
 
 -}
-andThen : ProgramRecord a Never model2 msg2 -> ProgramRecord Never a model1 msg1 -> ProgramRecord Never Never (AndThenModel Never model1 model2) (AndThenMsg a msg1 msg2)
+andThen : ProgramRecord a Never model2 msg2 -> ProgramRecord Never a model1 msg1 -> ProgramRecord Never Never (AndThenModel Never model1 model2) (AndThenMsg msg1 msg2)
 andThen second first =
     let
         init :
@@ -352,7 +352,7 @@ andThen second first =
             -> ProgramRecord a Never model2 msg2
             -> Maybe flags
             -> Location
-            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg a msg1 msg2) )
+            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg msg1 msg2) )
         init first second flags location =
             applyInit first.init flags location
                 |> handleFirstResult flags location
@@ -361,7 +361,7 @@ andThen second first =
             Maybe flags
             -> Location
             -> Result ( model1, Cmd msg1 ) a
-            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg a msg1 msg2) )
+            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg msg1 msg2) )
         handleFirstResult flags location result =
             case result of
                 Err ( authModel, authCmd ) ->
@@ -381,9 +381,9 @@ andThen second first =
                     )
 
         update :
-            AndThenMsg a msg1 msg2
+            AndThenMsg msg1 msg2
             -> AndThenModel flags model1 model2
-            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg a msg1 msg2) )
+            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg msg1 msg2) )
         update msg model =
             case model of
                 First flags location authModel ->
@@ -430,7 +430,7 @@ andThen second first =
 
         subscriptions :
             AndThenModel flags model1 model2
-            -> Sub (AndThenMsg a msg1 msg2)
+            -> Sub (AndThenMsg msg1 msg2)
         subscriptions model =
             case model of
                 First _ _ authModel ->
@@ -443,7 +443,7 @@ andThen second first =
 
         view :
             AndThenModel flags model1 model2
-            -> Html (AndThenMsg a msg1 msg2)
+            -> Html (AndThenMsg msg1 msg2)
         view model =
             case model of
                 First _ _ authModel ->
