@@ -67,6 +67,7 @@ import Task exposing (Task)
 
 -}
 type alias ProgramRecord flags done model msg =
+    -- TODO: make this private
     { init : ProgramType flags (Result ( model, Cmd msg ) done) msg
     , update : msg -> model -> Result ( model, Cmd msg ) done
     , subscriptions : model -> Sub msg
