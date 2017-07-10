@@ -63,11 +63,7 @@ import Task exposing (Task)
 
 -}
 type alias ProgramRecord flags done model msg =
-    ProgramRecord_ flags (Result ( model, Cmd msg ) done) done model msg
-
-
-type alias ProgramRecord_ flags init done model msg =
-    { init : ProgramType flags init msg
+    { init : ProgramType flags (Result ( model, Cmd msg ) done) msg
     , update : msg -> model -> Result ( model, Cmd msg ) done
     , subscriptions : model -> Sub msg
     , view : model -> Html msg
