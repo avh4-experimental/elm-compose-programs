@@ -511,14 +511,16 @@ If the read fails, the provided program will run to completion, after which the 
 
 If your `read` tasks takes a long time, you should provide a `loadingView` to be displayed while waiting for the task to finish.
 
+  - TODO: make this work with `flags /= Never`
+
 -}
 cache :
     { read : Task () done
     , write : done -> Task Never ()
     , loadingView : Maybe (Html Never)
     }
-    -> ProgramRecord flags done model msg
-    -> ProgramRecord flags done (CacheModel model) (CacheMsg done msg)
+    -> ProgramRecord Never done model msg
+    -> ProgramRecord Never done (CacheModel model) (CacheMsg done msg)
 cache config program =
     let
         update msg model =
