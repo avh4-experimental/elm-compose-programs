@@ -326,9 +326,9 @@ completableProgram config =
 --
 
 
-type AndThenModel flags model1 model2 msg2 a
+type AndThenModel flags model1 model2
     = First (Maybe flags) Location model1
-    | Second (ProgramRecord a Never model2 msg2) model2 -- TODO: shouldn't need first arg?
+    | Second model2
 
 
 type AndThenMsg a msg1 msg2
@@ -344,7 +344,7 @@ type AndThenMsg a msg1 msg2
   - TODO: allow `first` to have `flags /= Never`
 
 -}
-andThen : ProgramRecord a Never model2 msg2 -> ProgramRecord Never a model1 msg1 -> ProgramRecord Never Never (AndThenModel Never model1 model2 msg2 a) (AndThenMsg a msg1 msg2)
+andThen : ProgramRecord a Never model2 msg2 -> ProgramRecord Never a model1 msg1 -> ProgramRecord Never Never (AndThenModel Never model1 model2) (AndThenMsg a msg1 msg2)
 andThen second first =
     let
         init :
@@ -352,18 +352,17 @@ andThen second first =
             -> ProgramRecord a Never model2 msg2
             -> Maybe flags
             -> Location
-            -> ( AndThenModel flags model1 model2 msg2 a, Cmd (AndThenMsg a msg1 msg2) )
+            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg a msg1 msg2) )
         init first second flags location =
             applyInit first.init flags location
-                |> handleFirstResult second flags location
+                |> handleFirstResult flags location
 
         handleFirstResult :
-            ProgramRecord a Never model2 msg2
-            -> Maybe flags
+            Maybe flags
             -> Location
             -> Result ( model1, Cmd msg1 ) a
-            -> ( AndThenModel flags model1 model2 msg2 a, Cmd (AndThenMsg a msg1 msg2) )
-        handleFirstResult second flags location result =
+            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg a msg1 msg2) )
+        handleFirstResult flags location result =
             case result of
                 Err ( authModel, authCmd ) ->
                     ( First flags location authModel
@@ -377,17 +376,15 @@ andThen second first =
                             applyInit second.init (Just firstDone) location
                                 |> handleNever
                     in
-                    ( Second second mainModel
+                    ( Second mainModel
                     , Cmd.map SecondMsg cmd
                     )
 
         update :
-            ProgramRecord flags a model1 msg1
-            -> ProgramRecord a Never model2 msg2
-            -> AndThenMsg a msg1 msg2
-            -> AndThenModel flags model1 model2 msg2 a
-            -> ( AndThenModel flags model1 model2 msg2 a, Cmd (AndThenMsg a msg1 msg2) )
-        update first second msg model =
+            AndThenMsg a msg1 msg2
+            -> AndThenModel flags model1 model2
+            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg a msg1 msg2) )
+        update msg model =
             case model of
                 First flags location authModel ->
                     case msg of
@@ -398,11 +395,11 @@ andThen second first =
 
                                 Just onLocationChange ->
                                     first.update (onLocationChange newLocation) authModel
-                                        |> handleFirstResult second flags newLocation
+                                        |> handleFirstResult flags newLocation
 
                         FirstMsg authMsg ->
                             first.update authMsg authModel
-                                |> handleFirstResult second flags location
+                                |> handleFirstResult flags location
 
                         SecondMsg mainMsg ->
                             Debug.crash "ProgramWithAuth.update: got a MainMsg before auth finished. (This should not be possible.)" ( msg, model )
@@ -410,12 +407,12 @@ andThen second first =
                         IgnoreMsg ->
                             ( model, Cmd.none )
 
-                Second config mainModel ->
+                Second mainModel ->
                     case msg of
                         LocationChange location ->
-                            getLocationChange config.init
+                            getLocationChange second.init
                                 |> Maybe.map (\f -> f location)
-                                |> Maybe.map (\m -> update first second (SecondMsg m) model)
+                                |> Maybe.map (\m -> update (SecondMsg m) model)
                                 |> Maybe.withDefault ( model, Cmd.none )
 
                         FirstMsg authMsg ->
@@ -423,16 +420,16 @@ andThen second first =
                                 |> always ( model, Cmd.none )
 
                         SecondMsg mainMsg ->
-                            config.update mainMsg mainModel
+                            second.update mainMsg mainModel
                                 |> handleNever
-                                |> Tuple.mapFirst (Second config)
+                                |> Tuple.mapFirst Second
                                 |> Tuple.mapSecond (Cmd.map SecondMsg)
 
                         IgnoreMsg ->
                             ( model, Cmd.none )
 
         subscriptions :
-            AndThenModel flags model1 model2 msg2 a
+            AndThenModel flags model1 model2
             -> Sub (AndThenMsg a msg1 msg2)
         subscriptions model =
             case model of
@@ -440,12 +437,12 @@ andThen second first =
                     first.subscriptions authModel
                         |> Sub.map FirstMsg
 
-                Second _ mainModel ->
+                Second mainModel ->
                     second.subscriptions mainModel
                         |> Sub.map SecondMsg
 
         view :
-            AndThenModel flags model1 model2 msg2 a
+            AndThenModel flags model1 model2
             -> Html (AndThenMsg a msg1 msg2)
         view model =
             case model of
@@ -453,14 +450,14 @@ andThen second first =
                     first.view authModel
                         |> Html.map FirstMsg
 
-                Second _ mainModel ->
+                Second mainModel ->
                     second.view mainModel
                         |> Html.map SecondMsg
     in
     navigationProgram
         LocationChange
         { init = init first second Nothing
-        , update = update first second
+        , update = update
         , subscriptions = subscriptions
         , view = view
         }
