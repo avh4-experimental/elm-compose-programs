@@ -7,6 +7,7 @@ import Task
 import WakeProgram
 
 
+main : Program Never (ProgramRecord.AndThenModel () WakeProgram.Model) (ProgramRecord.AndThenMsg () WakeProgram.Msg)
 main =
     ProgramRecord.completableProgram
         { init = Err ( (), Process.sleep 700 |> Task.perform identity )

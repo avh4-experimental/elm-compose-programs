@@ -1,6 +1,8 @@
 module ProgramRecord
     exposing
-        ( ProgramRecord
+        ( AndThenModel
+        , AndThenMsg
+        , ProgramRecord
         , andThen
         , completableProgram
         , htmlProgram
@@ -39,7 +41,7 @@ module ProgramRecord
 
 ## Combining programs
 
-@docs andThen
+@docs andThen, AndThenModel, AndThenMsg
 
 -}
 
@@ -326,11 +328,13 @@ completableProgram config =
 --
 
 
-type AndThenModel flags model1 model2
-    = First (Maybe flags) Location model1
+{-| -}
+type AndThenModel model1 model2
+    = First Location model1
     | Second model2
 
 
+{-| -}
 type AndThenMsg msg1 msg2
     = LocationChange Location
     | FirstMsg msg1
@@ -344,7 +348,7 @@ type AndThenMsg msg1 msg2
   - TODO: allow `first` to have `flags /= Never`
 
 -}
-andThen : ProgramRecord a Never model2 msg2 -> ProgramRecord Never a model1 msg1 -> ProgramRecord Never Never (AndThenModel Never model1 model2) (AndThenMsg msg1 msg2)
+andThen : ProgramRecord a Never model2 msg2 -> ProgramRecord Never a model1 msg1 -> ProgramRecord Never Never (AndThenModel model1 model2) (AndThenMsg msg1 msg2)
 andThen second first =
     let
         init :
@@ -352,20 +356,19 @@ andThen second first =
             -> ProgramRecord a Never model2 msg2
             -> Maybe flags
             -> Location
-            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg msg1 msg2) )
+            -> ( AndThenModel model1 model2, Cmd (AndThenMsg msg1 msg2) )
         init first second flags location =
             applyInit first.init flags location
-                |> handleFirstResult flags location
+                |> handleFirstResult location
 
         handleFirstResult :
-            Maybe flags
-            -> Location
+            Location
             -> Result ( model1, Cmd msg1 ) a
-            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg msg1 msg2) )
-        handleFirstResult flags location result =
+            -> ( AndThenModel model1 model2, Cmd (AndThenMsg msg1 msg2) )
+        handleFirstResult location result =
             case result of
                 Err ( authModel, authCmd ) ->
-                    ( First flags location authModel
+                    ( First location authModel
                     , authCmd
                         |> Cmd.map FirstMsg
                     )
@@ -382,11 +385,11 @@ andThen second first =
 
         update :
             AndThenMsg msg1 msg2
-            -> AndThenModel flags model1 model2
-            -> ( AndThenModel flags model1 model2, Cmd (AndThenMsg msg1 msg2) )
+            -> AndThenModel model1 model2
+            -> ( AndThenModel model1 model2, Cmd (AndThenMsg msg1 msg2) )
         update msg model =
             case model of
-                First flags location authModel ->
+                First location authModel ->
                     case msg of
                         LocationChange newLocation ->
                             case getLocationChange first.init of
@@ -395,11 +398,11 @@ andThen second first =
 
                                 Just onLocationChange ->
                                     first.update (onLocationChange newLocation) authModel
-                                        |> handleFirstResult flags newLocation
+                                        |> handleFirstResult newLocation
 
                         FirstMsg authMsg ->
                             first.update authMsg authModel
-                                |> handleFirstResult flags location
+                                |> handleFirstResult location
 
                         SecondMsg mainMsg ->
                             Debug.crash "ProgramWithAuth.update: got a MainMsg before auth finished. (This should not be possible.)" ( msg, model )
@@ -429,11 +432,11 @@ andThen second first =
                             ( model, Cmd.none )
 
         subscriptions :
-            AndThenModel flags model1 model2
+            AndThenModel model1 model2
             -> Sub (AndThenMsg msg1 msg2)
         subscriptions model =
             case model of
-                First _ _ authModel ->
+                First _ authModel ->
                     first.subscriptions authModel
                         |> Sub.map FirstMsg
 
@@ -442,11 +445,11 @@ andThen second first =
                         |> Sub.map SecondMsg
 
         view :
-            AndThenModel flags model1 model2
+            AndThenModel model1 model2
             -> Html (AndThenMsg msg1 msg2)
         view model =
             case model of
-                First _ _ authModel ->
+                First _ authModel ->
                     first.view authModel
                         |> Html.map FirstMsg
 
